@@ -25,8 +25,7 @@ button{border:0;border-radius:12px;background:var(--mint);color:#082f49;font-wei
 button:active{transform:translateY(3px);box-shadow:0 2px 0 #0f766e}
 #start,#again,#resume{position:relative;z-index:2;min-width:160px;min-height:48px}
 #pause{position:absolute;z-index:3;top:10px;right:10px;min-width:0;min-height:40px;padding:8px 12px;font-size:13px;box-shadow:0 4px 0 #0f766e}
-.controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;height:72px}
-.control{font-size:25px;background:#334155;color:white;border:2px solid #64748b;box-shadow:0 5px 0 #1e293b;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none}
+#game{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .hint{text-align:center;color:#94a3b8;font-size:11px;padding-bottom:2px}
 .hidden{display:none!important}
 </style>
@@ -37,12 +36,11 @@ button:active{transform:translateY(3px);box-shadow:0 2px 0 #0f766e}
   <div id="stage">
     <canvas id="game" width="360" height="600" aria-label="Pixel Meteor Dash game"></canvas>
     <button id="pause" class="hidden" type="button" aria-label="Tạm dừng">Ⅱ PAUSE</button>
-    <div class="overlay" id="intro"><div class="card"><h1>PIXEL METEOR DASH</h1><p>Né thiên thạch, sống càng lâu càng tốt!<br>Chạm nút ◀ ▶ để di chuyển phi thuyền.</p><button id="start" type="button">CHƠI NGAY</button></div></div>
+    <div class="overlay" id="intro"><div class="card"><h1>PIXEL METEOR DASH</h1><p>Né thiên thạch, sống càng lâu càng tốt!<br>CHẠM VÀ KÉO PHI THUYỀN ĐỂ NÉ THIÊN THẠCH</p><button id="start" type="button">CHƠI NGAY</button></div></div>
     <div class="overlay hidden" id="pauseOverlay"><div class="card"><h1>ĐÃ TẠM DỪNG</h1><p>Trò chơi đang tạm dừng.<br>Nhấn tiếp tục khi bạn sẵn sàng.</p><button id="resume" type="button">TIẾP TỤC</button></div></div>
     <div class="overlay hidden" id="over"><div class="card"><h1>GAME OVER!</h1><p>Bạn đạt <b id="finalScore">0</b> điểm.<br>Thử lại để phá kỷ lục nhé!</p><button id="again" type="button">CHƠI LẠI</button></div></div>
   </div>
-  <div class="controls"><button class="control" id="left" type="button" aria-label="Sang trái">◀</button><button class="control" id="right" type="button" aria-label="Sang phải">▶</button></div>
-  <div class="hint">MẸO: Thiên thạch rơi nhanh dần theo thời gian • Chơi bằng một ngón tay</div>
+  <div class="hint">CHẠM VÀ KÉO PHI THUYỀN ĐỂ NÉ THIÊN THẠCH • KÉO MƯỢT BẰNG MỘT NGÓN TAY</div>
 </div>
 <script>
 (()=>{
@@ -73,6 +71,11 @@ function writeBest(value){
 
 let running=false,paused=false,rafId=0,score=0,best=readBest(),last=0,spawn=0,speed=145,rocks=[],stars=[];
 let player={x:180,y:520,w:24,h:24,v:0};
+// DEV-006: one-pointer FREE DRAG 2D state; player.x/y are the ship's top-left anchor.
+let dragPointerId=null,dragTargetX=168,dragTargetY=520,dragOffsetX=0,dragOffsetY=0;
+const DRAG_FOLLOW_RATE=20;
+const DRAG_SNAP_EPSILON=0.12;
+const SHIP_WIDTH=24,SHIP_HEIGHT=24;
 let lastStartInput=0;
 $('best').textContent=best;
 
@@ -80,9 +83,9 @@ for(let i=0;i<48;i++)stars.push({x:Math.random()*360,y:Math.random()*600,s:Math.
 
 function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),w,h)}
 function drawShip(x,y){
-  rect(x-4,y+8,8,8,'#0f766e');rect(x+16,y+8,8,8,'#0f766e');
+  rect(x,y+8,8,8,'#0f766e');rect(x+16,y+8,8,8,'#0f766e');
   rect(x+8,y,8,20,'#5eead4');rect(x+4,y+8,16,12,'#2dd4bf');
-  rect(x+8,y+7,8,5,'#ecfeff');rect(x+10,y+20,4,5,'#fbbf24');
+  rect(x+8,y+7,8,5,'#ecfeff');rect(x+10,y+20,4,4,'#fbbf24');
 }
 function drawRock(r){
   rect(r.x+5,r.y,14,5,'#fb7185');rect(r.x,r.y+5,24,14,'#e11d48');
@@ -96,7 +99,8 @@ function background(dt){
   for(let x=0;x<360;x+=24)rect(x,570,12,3,'#1e3a8a');
 }
 function reset(){
-  score=0;speed=145;spawn=0;rocks=[];player.x=168;player.v=0;
+  score=0;speed=145;spawn=0;rocks=[];player.x=168;player.y=520;player.v=0;
+  releaseDragControl();dragTargetX=player.x;dragTargetY=player.y;
   $('score').textContent='0';
 }
 function end(){
@@ -104,7 +108,7 @@ function end(){
   running=false;
   paused=false;
   if(rafId){cancelAnimationFrame(rafId);rafId=0;}
-  releaseAllInputs();
+  releaseDragControl();
   $('pause').classList.add('hidden');
   $('pauseOverlay').classList.add('hidden');
   $('finalScore').textContent=Math.floor(score);
@@ -122,8 +126,20 @@ function frame(t){
   score+=dt*10;
   speed=145+Math.min(score*1.8,190);
   $('score').textContent=Math.floor(score);
-  player.x+=player.v*dt;
-  player.x=Math.max(4,Math.min(332,player.x));
+  // DEV-006: exponential interpolation is frame-rate independent.
+  // dt is already capped at 40ms above to prevent jumps after interruptions.
+  const followAlpha=1-Math.exp(-DRAG_FOLLOW_RATE*dt);
+  const errorX=dragTargetX-player.x;
+  const errorY=dragTargetY-player.y;
+  if(Math.abs(errorX)<=DRAG_SNAP_EPSILON)player.x=dragTargetX;
+  else player.x+=errorX*followAlpha;
+  if(Math.abs(errorY)<=DRAG_SNAP_EPSILON)player.y=dragTargetY;
+  else player.y+=errorY*followAlpha;
+  player.x=Math.max(0,Math.min(336,player.x));
+  player.y=Math.max(0,Math.min(576,player.y));
+  dragTargetX=Math.max(0,Math.min(336,dragTargetX));
+  dragTargetY=Math.max(0,Math.min(576,dragTargetY));
+  player.v=0;
   spawn-=dt;
   if(spawn<=0){
     rocks.push({x:Math.random()*336,y:-26});
@@ -145,7 +161,7 @@ function frame(t){
 function start(){
   if(running)return;
   if(rafId){cancelAnimationFrame(rafId);rafId=0;}
-  releaseAllInputs();
+  releaseDragControl();
   reset();
   paused=false;
   $('intro').classList.add('hidden');
@@ -159,31 +175,24 @@ function start(){
 
 /* FIX DEV-003: Pause giữ nguyên phiên chơi nhưng dừng RAF và mọi cập nhật gameplay.
    Resume tái sử dụng vòng lặp hiện tại, đặt lại mốc thời gian để loại bỏ delta tích lũy. */
-/* FIX DEV-004: Chặn pointer/touch/mouse/keyboard press khi !running hoặc paused.
-   syncMovement() cưỡng chế player.v=0 ngoài trạng thái chơi; Pause và Resume đều
-   giải phóng toàn bộ pointer/key state để không giữ input cũ qua ranh giới trạng thái. */
+/* DEV-003/004 regression preservation: Pause, Resume, Start and Restart controls. */
 function pauseGame(){
   if(!running||paused)return;
-  // Set paused first so late input events cannot re-arm movement.
   paused=true;
-  releaseAllInputs();
+  releaseDragControl();
   if(rafId){cancelAnimationFrame(rafId);rafId=0;}
   $('pause').classList.add('hidden');
   $('pauseOverlay').classList.remove('hidden');
 }
 function resumeGame(){
   if(!running||!paused||document.hidden)return;
-  // Defensive cleanup: no pointer/key state from before Pause may survive Resume.
-  releaseAllInputs();
+  releaseDragControl();
   paused=false;
   $('pauseOverlay').classList.add('hidden');
   $('pause').classList.remove('hidden');
   last=performance.now();
   if(!rafId)rafId=requestAnimationFrame(frame);
 }
-
-/* FIX DEV-001: Pointer Events cho thiết bị mới; click làm fallback tương thích.
-   Chặn kích hoạt kép khi một lần chạm phát cả pointerup và click. */
 function activateStart(event){
   if(event)event.preventDefault();
   const now=Date.now();
@@ -208,105 +217,120 @@ if(window.PointerEvent){
 startButton.addEventListener('click',activateStart);
 againButton.addEventListener('click',activateStart);
 
-/* FIX DEV-002: Theo dõi từng pointer/touch riêng biệt.
-   Hướng di chuyển được tính lại từ toàn bộ input đang được giữ,
-   vì vậy thả một pointer không xóa trạng thái pointer còn lại. */
-const activePointers=new Map(); // pointerId/touch identifier -> direction (-1/+1)
-const activeKeys=new Set();
-
-function syncMovement(){
-  // FIX DEV-004: trạng thái game là cổng kiểm soát cuối cùng cho mọi input.
-  if(!running||paused){
-    player.v=0;
-    return;
-  }
-  let direction=0;
-  for(const dir of activePointers.values())direction+=dir;
-  for(const dir of activeKeys.values())direction+=dir;
-  player.v=direction===0?0:Math.sign(direction)*230;
-}
-function releaseAllInputs(){
-  activePointers.clear();
-  activeKeys.clear();
+/* CHANGELOG DEV-005:
+   - Thay hai nút trái/phải bằng kéo trực tiếp phi thuyền.
+   - Chuyển tọa độ màn hình sang tọa độ canvas theo bounding rect.
+   - Hitbox-only start, một pointer, giữ offset để tránh nhảy vị trí.
+*/
+/* CHANGELOG DEV-006:
+   - Nâng điều khiển thành FREE DRAG 2D theo cả trục X/Y.
+   - Mở rộng hitbox chạm, giữ offset cả hai trục.
+   - Nội suy suy giảm mũ theo delta time; snap trong ngưỡng sai số nhỏ.
+   - Giới hạn tọa độ top-left: X 0..336, Y 0..576.
+   - Thả/hủy/mất capture/Pause/Background sẽ đóng băng cả hai trục.
+   - Giữ nguyên RAF, gameplay, collision, score và lưu kỷ lục.
+*/
+/* Touch-to-Move: điều khiển một ngón tay trực tiếp trên phi thuyền. */
+function releaseDragControl(){
+  dragPointerId=null;
+  dragTargetX=player.x;
+  dragTargetY=player.y;
   player.v=0;
+}
+function canvasPoint(clientX,clientY){
+  const rect=canvas.getBoundingClientRect();
+  if(!rect.width||!rect.height)return null;
+  return {
+    x:(clientX-rect.left)*(canvas.width/rect.width),
+    y:(clientY-rect.top)*(canvas.height/rect.height)
+  };
+}
+function isInsideShipHitbox(point){
+  // Expanded 48x48 touch target centered on the 24x24 ship.
+  return !!point&&point.x>=player.x-12&&point.x<=player.x+SHIP_WIDTH+12&&
+    point.y>=player.y-12&&point.y<=player.y+SHIP_HEIGHT+12;
+}
+function canControlShip(){
+  return running&&!paused&&$('over').classList.contains('hidden')&&
+    $('intro').classList.contains('hidden')&&$('pauseOverlay').classList.contains('hidden');
+}
+function beginDrag(pointerId,clientX,clientY,event){
+  if(event)preventInputDefault(event);
+  if(dragPointerId!==null||!canControlShip())return;
+  const point=canvasPoint(clientX,clientY);
+  if(!isInsideShipHitbox(point))return;
+  dragPointerId=pointerId;
+  dragOffsetX=point.x-(player.x+SHIP_WIDTH/2);
+  dragOffsetY=point.y-(player.y+SHIP_HEIGHT/2);
+  dragTargetX=player.x;
+  dragTargetY=player.y;
+}
+function moveDrag(pointerId,clientX,clientY,event){
+  if(event)preventInputDefault(event);
+  if(dragPointerId===null||pointerId!==dragPointerId||!canControlShip())return;
+  const point=canvasPoint(clientX,clientY);
+  if(!point)return;
+  const centerX=point.x-dragOffsetX;
+  const centerY=point.y-dragOffsetY;
+  dragTargetX=Math.max(0,Math.min(336,centerX-SHIP_WIDTH/2));
+  dragTargetY=Math.max(0,Math.min(576,centerY-SHIP_HEIGHT/2));
+}
+function endDrag(pointerId,event){
+  if(event)preventInputDefault(event);
+  if(dragPointerId===null||pointerId!==dragPointerId)return;
+  releaseDragControl();
 }
 function preventInputDefault(event){
   if(event&&event.cancelable)event.preventDefault();
 }
-function hold(el,dir){
-  if(window.PointerEvent){
-    el.addEventListener('pointerdown',event=>{
-      preventInputDefault(event);
-      if(!running||paused)return;
-      // Không lọc isPrimary: pointer thứ hai phải được nhận để hỗ trợ multi-touch.
-      activePointers.set(event.pointerId,dir);
-      syncMovement();
-      if(el.setPointerCapture){
-        try{el.setPointerCapture(event.pointerId);}catch(_){}
-      }
-    });
-    const releasePointer=event=>{
-      preventInputDefault(event);
-      if(activePointers.delete(event.pointerId))syncMovement();
-    };
-    ['pointerup','pointercancel','lostpointercapture'].forEach(type=>{
-      el.addEventListener(type,releasePointer);
-    });
-  }else{
-    // Fallback cho trình duyệt cũ: mỗi Touch.identifier có trạng thái riêng.
-    el.addEventListener('touchstart',event=>{
-      preventInputDefault(event);
-      if(!running||paused)return;
-      for(const touch of event.changedTouches)activePointers.set(touch.identifier,dir);
-      syncMovement();
-    },{passive:false});
-    const releaseTouches=event=>{
-      preventInputDefault(event);
-      for(const touch of event.changedTouches)activePointers.delete(touch.identifier);
-      syncMovement();
-    };
-    ['touchend','touchcancel'].forEach(type=>{
-      el.addEventListener(type,releaseTouches,{passive:false});
-    });
-
-    // Mouse fallback chỉ dùng khi Pointer Events không được hỗ trợ.
-    const mouseId='mouse:'+dir;
-    el.addEventListener('mousedown',event=>{
-      preventInputDefault(event);
-      if(!running||paused)return;
-      activePointers.set(mouseId,dir);
-      syncMovement();
-    });
-    const releaseMouse=event=>{
-      preventInputDefault(event);
-      if(activePointers.delete(mouseId))syncMovement();
-    };
-    ['mouseup','mouseleave'].forEach(type=>el.addEventListener(type,releaseMouse));
-  }
+if(window.PointerEvent){
+  canvas.addEventListener('pointerdown',event=>{
+    if(event.pointerType==='mouse'&&event.button!==0)return;
+    beginDrag(event.pointerId,event.clientX,event.clientY,event);
+    if(dragPointerId===event.pointerId&&canvas.setPointerCapture){
+      try{canvas.setPointerCapture(event.pointerId);}catch(_){}
+    }
+  });
+  canvas.addEventListener('pointermove',event=>{
+    moveDrag(event.pointerId,event.clientX,event.clientY,event);
+  });
+  ['pointerup','pointercancel','lostpointercapture'].forEach(type=>{
+    canvas.addEventListener(type,event=>endDrag(event.pointerId,event));
+  });
+}else{
+  canvas.addEventListener('touchstart',event=>{
+    preventInputDefault(event);
+    if(dragPointerId!==null||!event.changedTouches.length)return;
+    const t=event.changedTouches[0];
+    beginDrag(t.identifier,t.clientX,t.clientY,event);
+  },{passive:false});
+  canvas.addEventListener('touchmove',event=>{
+    preventInputDefault(event);
+    if(dragPointerId===null)return;
+    for(const t of event.changedTouches){
+      if(t.identifier===dragPointerId){moveDrag(t.identifier,t.clientX,t.clientY,event);break;}
+    }
+  },{passive:false});
+  const finishTouch=event=>{
+    preventInputDefault(event);
+    for(const t of event.changedTouches)endDrag(t.identifier,event);
+  };
+  ['touchend','touchcancel'].forEach(type=>canvas.addEventListener(type,finishTouch,{passive:false}));
+  canvas.addEventListener('mousedown',event=>{
+    if(event.button===0)beginDrag('mouse',event.clientX,event.clientY,event);
+  });
+  canvas.addEventListener('mousemove',event=>moveDrag('mouse',event.clientX,event.clientY,event));
+  ['mouseup','mouseleave'].forEach(type=>canvas.addEventListener(type,event=>endDrag('mouse',event)));
 }
-hold($('left'),-1);
-hold($('right'),1);
-
-document.addEventListener('keydown',event=>{
-  if(!running||paused)return;
-  if(event.key==='ArrowLeft'||event.key==='a')activeKeys.add(-1);
-  if(event.key==='ArrowRight'||event.key==='d')activeKeys.add(1);
-  syncMovement();
-});
-document.addEventListener('keyup',event=>{
-  if(event.key==='ArrowLeft'||event.key==='a')activeKeys.delete(-1);
-  if(event.key==='ArrowRight'||event.key==='d')activeKeys.delete(1);
-  syncMovement();
-});
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){
     if(running&&!paused)pauseGame();
-    else releaseAllInputs();
+    else releaseDragControl();
   }
 });
-window.addEventListener('blur',releaseAllInputs);
+window.addEventListener('blur',releaseDragControl);
 window.addEventListener('pagehide',()=>{
-  releaseAllInputs();
+  releaseDragControl();
   if(running&&!paused)pauseGame();
 });
 
