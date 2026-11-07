@@ -6,6 +6,10 @@ android {
     namespace 'com.pixelmeteordash.app'
     compileSdk 35
 
+ buildFeatures {
+        buildConfig true
+    }
+    
     defaultConfig {
         applicationId 'com.pixelmeteordash.app'
         minSdk 23
