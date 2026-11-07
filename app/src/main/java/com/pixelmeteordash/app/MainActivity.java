@@ -12,7 +12,8 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import androidx.webkit.WebViewAssetLoader;
-import androidx.webkit.WebViewFeature;\nimport androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewFeature;
+import androidx.webkit.WebSettingsCompat;
 
 public final class MainActivity extends Activity {
     private static final String TAG = "PMD-WebView";
